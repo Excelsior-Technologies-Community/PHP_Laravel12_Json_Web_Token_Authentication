@@ -1,0 +1,2 @@
+# PHP_Laravel12_Json_Web_Token_Authentication
+
