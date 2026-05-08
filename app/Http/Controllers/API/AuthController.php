@@ -5,13 +5,14 @@ namespace App\Http\Controllers\API;
 use App\Http\Controllers\API\BaseController as BaseController;
 use App\Models\User;
 use Illuminate\Http\Request;
-use Validator;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\DB;
 
 class AuthController extends BaseController
 {
-    // Register new user
     public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
@@ -32,38 +33,45 @@ class AuthController extends BaseController
         return $this->sendResponse(['user' => $user], 'User registered successfully.');
     }
 
-    // Login user and get JWT
     public function login(Request $request)
     {
+        $key = 'login-attempts:' . $request->ip() . '|' . $request->email;
+
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            $seconds = RateLimiter::availableIn($key);
+            return $this->sendError('Too many login attempts.', ['retry_after' => $seconds . ' seconds'], 429);
+        }
+
         $credentials = $request->only('email', 'password');
 
         if (!$token = auth()->attempt($credentials)) {
+            RateLimiter::hit($key, 600);
             return $this->sendError('Unauthorised', ['error' => 'Invalid credentials']);
         }
+
+        RateLimiter::clear($key);
+
+        $this->recordDeviceActivity($request, $token);
 
         return $this->sendResponse($this->respondWithToken($token), 'User logged in successfully.');
     }
 
-    // Logout user
     public function logout()
     {
-        auth()->logout();
+        auth()->logout(true);
         return $this->sendResponse([], 'Logged out successfully.');
     }
 
-    // Refresh JWT token
     public function refresh()
     {
         return $this->sendResponse($this->respondWithToken(auth()->refresh()), 'Token refreshed successfully.');
     }
 
-    // Get profile
     public function profile()
     {
         return $this->sendResponse(auth()->user(), 'User profile retrieved successfully.');
     }
 
-    // Update profile
     public function updateProfile(Request $request)
     {
         $user = auth()->user();
@@ -78,7 +86,6 @@ class AuthController extends BaseController
         return $this->sendResponse($user, 'Profile updated successfully.');
     }
 
-    // Change password
     public function changePassword(Request $request)
     {
         $request->validate([
@@ -98,26 +105,52 @@ class AuthController extends BaseController
         return $this->sendResponse([], 'Password changed successfully.');
     }
 
-    // Forgot password (send reset token)
     public function forgotPassword(Request $request)
     {
         $request->validate(['email' => 'required|email|exists:users,email']);
 
         $token = Str::random(60);
 
-        \DB::table('password_resets')->insert([
+        DB::table('password_resets')->insert([
             'email' => $request->email,
             'token' => $token,
             'created_at' => now(),
         ]);
 
-        // Here you can send email with token
-        // Mail::to($request->email)->send(new ResetPasswordMail($token));
-
         return $this->sendResponse(['token' => $token], 'Password reset token generated.');
     }
 
-    // Format JWT response
+    public function getActiveDevices()
+    {
+        $devices = DB::table('user_devices')
+            ->where('user_id', auth()->id())
+            ->get(['id', 'ip_address', 'user_agent', 'created_at']);
+
+        return $this->sendResponse($devices, 'Active devices retrieved.');
+    }
+
+    public function logoutDevice($id)
+    {
+        DB::table('user_devices')
+            ->where('id', $id)
+            ->where('user_id', auth()->id())
+            ->delete();
+
+        return $this->sendResponse([], 'Device session removed.');
+    }
+
+    protected function recordDeviceActivity($request, $token)
+    {
+        DB::table('user_devices')->insert([
+            'user_id' => auth()->id(),
+            'ip_address' => $request->ip(),
+            'user_agent' => $request->userAgent(),
+            'token_id' => hash('sha256', $token),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    }
+
     protected function respondWithToken($token)
     {
         return [
