@@ -5,14 +5,6 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\API\AuthController;
 use App\Http\Controllers\API\UserController;
 
-/*
-|--------------------------------------------------------------------------
-| API Authentication Routes
-|--------------------------------------------------------------------------
-| JWT-based authentication routes
-*/
-
-// Public routes (no auth required)
 Route::group([
     'middleware' => 'api',
     'prefix' => 'auth'
@@ -22,7 +14,6 @@ Route::group([
     Route::post('/login', [AuthController::class, 'login']);
     Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 
-    // Protected routes (require JWT)
     Route::middleware('auth:api')->group(function () {
 
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -30,10 +21,11 @@ Route::group([
         Route::get('/profile', [AuthController::class, 'profile']);
         Route::put('/profile', [AuthController::class, 'updateProfile']);
         Route::put('/change-password', [AuthController::class, 'changePassword']);
+        
+        Route::get('/active-devices', [AuthController::class, 'getActiveDevices']);
+        Route::post('/logout-device/{id}', [AuthController::class, 'logoutDevice']);
 
-        // Example: admin-only route
-        Route::get('/all-users', [UserController::class, 'index'])
-            ->middleware('role:admin');
+        Route::get('/all-users', [UserController::class, 'index'])->middleware('role:admin');
     });
 });
 
